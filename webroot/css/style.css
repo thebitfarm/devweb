@@ -1,0 +1,28 @@
+/* Put your CSS here */
+html, body {
+    margin: 20px;
+}
+
+body {
+  padding-top: 50px;
+}
+/*
+.main-container {
+  padding: 40px 15px;
+  text-align: center;
+}
+*/
+.active {
+	font-weight: bold;
+}
+
+.span3 {
+	float: left;
+	display: block;
+	width: 25%;
+}
+
+.span9 {
+	float: left;
+	display: block;
+}
