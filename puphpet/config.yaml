@@ -7,9 +7,6 @@ vagrantfile-local:
         network:
             private_network: 192.168.56.101
             forwarded_port:
-                wI2p9DEc2JYi:
-                    host: '8020'
-                    guest: '22'
                 QM4S8XS1SGAM:
                     host: '8081'
                     guest: '80'
@@ -45,6 +42,11 @@ vagrantfile-local:
                 source: ./julia-sudoku
                 target: /home/sudoku
                 nfs: 'false'
+            UOELApe3rCdc:
+                id: node-rest
+                source: ./node-rest
+                target: /home/node
+                nfs: 'false'
         usable_port_range: 2200..2250
     ssh:
         host: null
@@ -63,6 +65,8 @@ server:
         - vim
         - curl
         - julia
+        - nodejs
+        - apache2-utils
     dot_files:
         -
             bash_aliases: null
@@ -76,32 +80,21 @@ mailcatcher:
         http_port: '1080'
         mailcatcher_path: /usr/local/bin
         log_path: /var/log/mailcatcher/mailcatcher.log
-apache:
-    install: 0
-    settings:
-        user: www-data
-        group: www-data
-        default_vhost: true
-        manage_user: false
-        manage_group: false
-        sendfile: 0
-    modules:
-        - php
-        - rewrite
+nginx:
+    install: '1'
     vhosts:
-        3n1GvE7jmJgR:
-            servername: awesome.dev
-            serveraliases:
-                - www.awesome.dev
-            docroot: /var/www/awesome
-            port: '80'
-            setenv:
+        lDLDrGvFItIR:
+            server_name: dev.thebitfarm.org
+            server_aliases:
+                - dev.thebitfarm.org
+            www_root: /var/www/html/devweb
+            listen_port: '8080'
+            index_files:
+                - index.html
+                - index.htm
+                - index.php
+            envvars:
                 - 'APP_ENV dev'
-            override:
-                - All
-            custom_fragment: ''
-    mod_pagespeed: 0
-    mod_spdy: 0
 php:
     install: '1'
     version: '54'

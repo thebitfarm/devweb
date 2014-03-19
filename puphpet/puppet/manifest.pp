@@ -10,6 +10,7 @@ class { 'ntp': }
 
 include 'puphpet'
 include 'puphpet::params'
+include nodejs
 
 Exec { path => [ '/bin/', '/sbin/', '/usr/bin/', '/usr/sbin/' ] }
 group { 'puppet':   ensure => present }
@@ -31,6 +32,12 @@ user { ['apache', 'nginx', 'httpd', 'www-data']:
 user { 'sudoku':
   shell => '/bin/bash',
   home  => '/home/sudoku',
+  ensure => present
+}
+
+user { 'node':
+  shell => '/bin/bash',
+  home  => '/home/node',
   ensure => present
 }
 
@@ -171,8 +178,8 @@ case $::operatingsystem {
       apt::ppa { 'ppa:pdoes/ppa': require => Apt::Key['4CBEDD5A'] }
     }
 
-    apt::ppa { 'ppa:staticfloat/juliareleases' }
-    apt::ppa { 'ppa:staticfloat/julia-deps' }
+    apt::ppa { 'ppa:staticfloat/juliareleases': }
+    apt::ppa { 'ppa:staticfloat/julia-deps': }
 
     if hash_key_equals($php_values, 'install', 1) {
       # Ubuntu Lucid 10.04, Precise 12.04, Quantal 12.10 and Raring 13.04 can do PHP 5.3 (default <= 12.10) and 5.4 (default <= 13.04)
@@ -285,27 +292,30 @@ if hash_key_equals($mailcatcher_values, 'install', 1) {
   }
 }
 
-## Begin Apache manifest
+## Begin Nginx manifest
 
-if $yaml_values == undef {
-  $yaml_values = loadyaml('/vagrant/puphpet/config.yaml')
-} if $apache_values == undef {
-  $apache_values = $yaml_values['apache']
+if $nginx_values == undef {
+   $nginx_values = hiera('nginx', false)
 } if $php_values == undef {
-  $php_values = hiera('php', false)
+   $php_values = hiera('php', false)
 } if $hhvm_values == undef {
   $hhvm_values = hiera('hhvm', false)
 }
 
-if hash_key_equals($apache_values, 'install', 1) {
-  include puphpet::params
-  include apache::params
+if hash_key_equals($nginx_values, 'install', 1) {
+  if $lsbdistcodename == 'lucid' and hash_key_equals($php_values, 'version', '53') {
+    apt::key { '67E15F46': key_server => 'hkp://keyserver.ubuntu.com:80' }
+    apt::ppa { 'ppa:l-mierzwa/lucid-php5':
+      options => '',
+      require => Apt::Key['67E15F46']
+    }
+  }
 
-  $webroot_location = $puphpet::params::apache_webroot_location
+  $webroot_location = $puphpet::params::nginx_webroot_location
 
   exec { "exec mkdir -p ${webroot_location}":
     command => "mkdir -p ${webroot_location}",
-    creates => $webroot_location,
+    onlyif  => "test -d ${webroot_location}",
   }
 
   if ! defined(File[$webroot_location]) {
@@ -320,40 +330,69 @@ if hash_key_equals($apache_values, 'install', 1) {
     }
   }
 
-  if hash_key_equals($hhvm_values, 'install', 1) {
-    $mpm_module           = 'worker'
-    $disallowed_modules   = ['php']
-    $apache_conf_template = 'puphpet/apache/hhvm-httpd.conf.erb'
-    $apache_php_package   = 'hhvm'
-  } elsif hash_key_equals($php_values, 'install', 1) {
-    $mpm_module           = 'prefork'
-    $disallowed_modules   = []
-    $apache_conf_template = $apache::params::conf_template
-    $apache_php_package   = 'php'
+  if hash_key_equals($php_values, 'install', 1) {
+    $php5_fpm_sock = '/var/run/php5-fpm.sock'
+
+    if $php_values['version'] == undef {
+      $fastcgi_pass = null
+    } elsif $php_values['version'] == '53' {
+      $fastcgi_pass = '127.0.0.1:9000'
+    } else {
+      $fastcgi_pass = "unix:${php5_fpm_sock}"
+    }
+
+    $fastcgi_param_parts = [
+      'PATH_INFO $fastcgi_path_info',
+      'PATH_TRANSLATED $document_root$fastcgi_path_info',
+      'SCRIPT_FILENAME $document_root$fastcgi_script_name'
+    ]
+
+    if $::osfamily == 'redhat' and $fastcgi_pass == "unix:${php5_fpm_sock}" {
+      exec { "create ${php5_fpm_sock} file":
+        command => "touch ${php5_fpm_sock} && chmod 777 ${php5_fpm_sock}",
+        onlyif  => ["test ! -f ${php5_fpm_sock}", "test ! -f ${php5_fpm_sock}="],
+        require => Package['nginx']
+      }
+
+      exec { "listen = 127.0.0.1:9000 => listen = ${php5_fpm_sock}":
+        command => "perl -p -i -e 's#listen = 127.0.0.1:9000#listen = ${php5_fpm_sock}#gi' /etc/php-fpm.d/www.conf",
+        unless  => "grep -c 'listen = 127.0.0.1:9000' '${php5_fpm_sock}'",
+        notify  => [
+          Class['nginx::service'],
+          Service['php-fpm']
+        ],
+        require => Exec["create ${php5_fpm_sock} file"]
+      }
+    }
+  } elsif hash_key_equals($hhvm_values, 'install', 1) {
+    $fastcgi_pass        = '127.0.0.1:9000'
+    $fastcgi_param_parts = [
+      'SCRIPT_FILENAME $document_root$fastcgi_script_name'
+    ]
   } else {
-    $mpm_module           = 'prefork'
-    $disallowed_modules   = []
-    $apache_conf_template = $apache::params::conf_template
-    $apache_php_package   = ''
+    $fastcgi_pass        = ''
+    $fastcgi_param_parts = []
   }
 
-  if $::operatingsystem == 'ubuntu'
-  and hash_key_equals($php_values, 'install', 1)
-  and hash_key_equals($php_values, 'version', 55)
-  {
-    $apache_version = '2.4'
-  } else {
-    $apache_version = $apache::version::default
+  class { 'nginx': }
+
+  if count($nginx_values['vhosts']) > 0 {
+    each( $nginx_values['vhosts'] ) |$key, $vhost| {
+      exec { "exec mkdir -p ${vhost['www_root']} @ key ${key}":
+        command => "mkdir -p ${vhost['www_root']}",
+        creates => $vhost['docroot'],
+      }
+
+      if ! defined(File[$vhost['www_root']]) {
+        file { $vhost['www_root']:
+          ensure  => directory,
+          require => Exec["exec mkdir -p ${vhost['www_root']} @ key ${key}"]
+        }
+      }
+    }
+
+    create_resources(nginx_vhost, $nginx_values['vhosts'])
   }
-
-  $apache_settings = merge($apache_values['settings'], {
-    'mpm_module'     => $mpm_module,
-    'conf_template'  => $apache_conf_template,
-    'sendfile'       => $apache_values['settings']['sendfile'] ? { 0 => 'Off', 1 => 'On', default => 'Off' },
-    'apache_version' => $apache_version
-  })
-
-  create_resources('class', { 'apache' => $apache_settings })
 
   if $::osfamily == 'redhat' and ! defined(Iptables::Allow['tcp/80']) {
     iptables::allow { 'tcp/80':
@@ -361,43 +400,52 @@ if hash_key_equals($apache_values, 'install', 1) {
       protocol => 'tcp'
     }
   }
-
-  if hash_key_equals($apache_values, 'mod_pagespeed', 1) {
-    class { 'puphpet::apache::modpagespeed': }
-  }
-
-  if hash_key_equals($apache_values, 'mod_spdy', 1) {
-    class { 'puphpet::apache::modspdy':
-      php_package => $apache_php_package
-    }
-  }
-
-  if count($apache_values['vhosts']) > 0 {
-    each( $apache_values['vhosts'] ) |$key, $vhost| {
-      exec { "exec mkdir -p ${vhost['docroot']} @ key ${key}":
-        command => "mkdir -p ${vhost['docroot']}",
-        creates => $vhost['docroot'],
-      }
-
-      if ! defined(File[$vhost['docroot']]) {
-        file { $vhost['docroot']:
-          ensure  => directory,
-          require => Exec["exec mkdir -p ${vhost['docroot']} @ key ${key}"]
-        }
-      }
-    }
-  }
-
-  create_resources(apache::vhost, $apache_values['vhosts'])
-
-  if count($apache_values['modules']) > 0 {
-    apache_mod { $apache_values['modules']: }
-  }
 }
 
-define apache_mod {
-  if ! defined(Class["apache::mod::${name}"]) and !($name in $disallowed_modules) {
-    class { "apache::mod::${name}": }
+define nginx_vhost (
+  $server_name,
+  $server_aliases = [],
+  $www_root,
+  $listen_port,
+  $index_files,
+  $envvars = [],
+){
+  $merged_server_name = concat([$server_name], $server_aliases)
+
+  if is_array($index_files) and count($index_files) > 0 {
+    $try_files = $index_files[count($index_files) - 1]
+  } else {
+    $try_files = 'index.php'
+  }
+
+  nginx::resource::vhost { $server_name:
+    server_name      => $merged_server_name,
+    www_root         => $www_root,
+    listen_port      => $listen_port,
+    index_files      => $index_files,
+    try_files        => ['$uri', '$uri/', "/${try_files}?\$args"],
+    vhost_cfg_append => {
+       sendfile => 'off'
+    }
+  }
+
+  $fastcgi_param = concat($fastcgi_param_parts, $envvars)
+
+  nginx::resource::location { "${server_name}-php":
+    ensure              => present,
+    vhost               => $server_name,
+    location            => '~ \.php$',
+    proxy               => undef,
+    try_files           => ['$uri', '$uri/', "/${try_files}?\$args"],
+    www_root            => $www_root,
+    location_cfg_append => {
+      'fastcgi_split_path_info' => '^(.+\.php)(/.+)$',
+      'fastcgi_param'           => $fastcgi_param,
+      'fastcgi_pass'            => $fastcgi_pass,
+      'fastcgi_index'           => 'index.php',
+      'include'                 => 'fastcgi_params'
+    },
+    notify              => Class['nginx::service'],
   }
 }
 
@@ -1192,3 +1240,14 @@ if hash_key_equals($rabbitmq_values, 'install', 1) {
   }
 }
 
+# Begin nodejs
+#apt::pin { 'sid': priority => 100 }
+#package { 'restify': 
+#  ensure    => latest,
+#  provider  => 'npm'
+#}
+
+#package { 'mongoose':
+#  ensure    => '3.8.8',
+#  provider  => 'npm'
+#}
