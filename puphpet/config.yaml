@@ -65,7 +65,6 @@ server:
         - vim
         - curl
         - julia
-        - nodejs
         - apache2-utils
     dot_files:
         -
