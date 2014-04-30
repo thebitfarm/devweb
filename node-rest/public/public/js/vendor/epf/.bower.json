@@ -1,0 +1,15 @@
+{
+  "name": "epf",
+  "homepage": "https://github.com/getoutreach/epf",
+  "version": "0.1.4",
+  "_release": "0.1.4",
+  "_resolution": {
+    "type": "version",
+    "tag": "v0.1.4",
+    "commit": "3ed3c0477fc938ee78dc0f88fa4e261e1b9ded03"
+  },
+  "_source": "https://github.com/getoutreach/epf.git",
+  "_target": "~0.1.4",
+  "_originalSource": "https://github.com/getoutreach/epf.git",
+  "_direct": true
+}

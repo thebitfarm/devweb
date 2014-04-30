@@ -1,0 +1,28 @@
+{
+  "name": "epf",
+  "version": "0.1.4",
+  "description": "A framework to keep you Ember.js apps in sync.",
+  "main": "./lib/index.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": "https://github.com/GroupTalent/epf.git",
+  "keywords": [
+    "ember.js",
+    "orm",
+    "persistence",
+    "sync"
+  ],
+  "author": "Gordon L. Hempton",
+  "license": "MIT",
+  "devDependencies": {
+    "mkdirp": "*",
+    "chai": "*",
+    "mocha": "*",
+    "ember-script": "*",
+    "jquery": "*",
+    "mocha-as-promised": "*",
+    "commonjs-everywhere": "*",
+    "escodegen": "*"
+  }
+}
